@@ -109,32 +109,32 @@ struct HomeView: View {
             }
             .tag(0)
             
-            // Other tabs
-            Group {
-                Color.black.ignoresSafeArea()
-                    .tabItem {
-                        TabBarItemView(imageName: "magnifyingglass", title: "Discover", isSystemImage: true)
-                    }
-                    .tag(1)
-                
-                Color.black.ignoresSafeArea()
-                    .tabItem {
-                        TabBarItemView(imageName: "plus", title: "Create", isSystemImage: true)
-                    }
-                    .tag(2)
-                
-                Color.black.ignoresSafeArea()
-                    .tabItem {
-                        TabBarItemView(imageName: "message", title: "Inbox", isSystemImage: true)
-                    }
-                    .tag(3)
-                
-                Color.black.ignoresSafeArea()
-                    .tabItem {
-                        TabBarItemView(imageName: "person", title: "Profile", isSystemImage: true)
-                    }
-                    .tag(4)
-            }
+            // Discover Tab
+            Color.black.ignoresSafeArea()
+                .tabItem {
+                    TabBarItemView(imageName: "magnifyingglass", title: "Discover", isSystemImage: true)
+                }
+                .tag(1)
+            
+            // Create Tab - Updated to show VideoUploadView
+            VideoUploadView()
+                .tabItem {
+                    TabBarItemView(imageName: "plus", title: "Create", isSystemImage: true)
+                }
+                .tag(2)
+            
+            // Inbox Tab
+            Color.black.ignoresSafeArea()
+                .tabItem {
+                    TabBarItemView(imageName: "message", title: "Inbox", isSystemImage: true)
+                }
+                .tag(3)
+            
+            Color.black.ignoresSafeArea()
+                .tabItem {
+                    TabBarItemView(imageName: "person", title: "Profile", isSystemImage: true)
+                }
+                .tag(4)
         }
         .tint(.white)
         .preferredColorScheme(.dark)
