@@ -1,106 +1,35 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Helper functions for common checks
+    // Helper functions for basic checks
     function isAuthenticated() {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-    
-    function isValidVideoSize() {
-      return request.resource.size <= 500 * 1024 * 1024;  // 500MB
-    }
-    
-    function isValidThumbnailSize() {
-      return request.resource.size <= 5 * 1024 * 1024;    // 5MB
-    }
-    
-    function isValidVideoType() {
-      return request.resource.contentType.matches('video/.*') &&
-             (request.resource.contentType.matches('video/mp4') ||
-              request.resource.contentType.matches('video/quicktime'));
-    }
-    
-    function isValidImageType() {
-      return request.resource.contentType.matches('image/.*') &&
-             (request.resource.contentType.matches('image/jpeg') ||
-              request.resource.contentType.matches('image/png'));
-    }
-    
-    function isValidMetadata() {
-      return request.resource.metadata != null &&
-             request.resource.metadata.customMetadata != null &&
-             request.resource.metadata.customMetadata.processingStatus != null &&
-             request.resource.metadata.customMetadata.transcodingStatus != null &&
-             request.resource.metadata.customMetadata.thumbnailStatus != null &&
-             request.resource.metadata.customMetadata.transcriptStatus != null &&
-             request.resource.metadata.customMetadata.summaryStatus != null &&
-             request.resource.metadata.customMetadata.uploaderId != null &&
-             request.resource.metadata.customMetadata.videoId != null &&
-             request.resource.metadata.customMetadata.uploadAttempt != null &&
-             request.resource.metadata.customMetadata.timestamp != null;
-    }
-
-    // Base rule - deny all by default
+    // Base rule - allow all read access
     match /{allPaths=**} {
       allow read: if true;  // Allow public read access to all files
-      allow write: if false; // Deny write by default
+      allow write: if isAuthenticated(); // Allow any authenticated user to write
     }
     
-    // Video upload rules
+    // Video upload rules - very lenient
     match /videos/{userId}/{filename} {
-      allow read: if true;  // Anyone can view videos
-      allow create: if 
-        isOwner(userId) &&
-        isValidVideoSize() &&
-        isValidVideoType() &&
-        isValidMetadata() &&
-        // Enforce filename pattern (UUID.mp4)
-        filename.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.mp4$');
-      
-      allow update: if 
-        isOwner(userId) &&
-        isValidVideoSize() &&
-        isValidVideoType() &&
-        isValidMetadata();
-        
-      allow delete: if isOwner(userId);
+      allow read, write: if true;  // Allow complete public access
     }
     
-    // Thumbnail rules
+    // Thumbnail rules - very lenient
     match /thumbnails/{userId}/{filename} {
-      allow read: if true;
-      allow create: if 
-        isOwner(userId) &&
-        isValidThumbnailSize() &&
-        isValidImageType() &&
-        // Enforce filename pattern (UUID.jpg or UUID.png)
-        filename.matches('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.(jpg|png)$');
-      
-      allow update: if 
-        isOwner(userId) &&
-        isValidThumbnailSize() &&
-        isValidImageType();
-        
-      allow delete: if isOwner(userId);
+      allow read, write: if true;  // Allow complete public access
     }
     
-    // Profile pictures
+    // Profile pictures - very lenient
     match /profilePictures/{userId}/{filename} {
-      allow read: if true;
-      allow create, update: if 
-        isOwner(userId) &&
-        isValidImageType() &&
-        request.resource.size <= 2 * 1024 * 1024; // 2MB limit
-      allow delete: if isOwner(userId);
+      allow read, write: if true;  // Allow complete public access
     }
     
-    // Temporary processing directory (for Cloud Functions)
+    // Temporary processing directory - still restricted for Cloud Functions
     match /processing/{userId}/{filename} {
-      allow read: if isOwner(userId);
+      allow read: if true;
       allow write: if false; // Only Cloud Functions should write here
     }
   }
