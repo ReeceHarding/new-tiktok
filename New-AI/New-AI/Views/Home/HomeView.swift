@@ -5,10 +5,93 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 
+// MARK: - Tab Bar Item View
+struct TabBarItemView: View {
+    let imageName: String
+    let title: String
+    let isSystemImage: Bool
+    
+    var body: some View {
+        VStack {
+            if isSystemImage {
+                Image(systemName: imageName)
+                    .environment(\.symbolVariants, title == "Create" ? .none : .fill)
+            } else {
+                Image(imageName)
+            }
+            Text(title)
+        }
+    }
+}
+
+// MARK: - Feed Header View
+struct FeedHeaderView: View {
+    @Binding var selectedTab: Int
+    @Namespace var animation
+    
+    var body: some View {
+        HStack(spacing: 20) {
+            Text("Following")
+                .foregroundColor(selectedTab == 0 ? .white : .gray)
+                .fontWeight(selectedTab == 0 ? .semibold : .regular)
+                .overlay(alignment: .bottom) {
+                    if selectedTab == 0 {
+                        Rectangle()
+                            .frame(height: 2)
+                            .matchedGeometryEffect(id: "TAB", in: animation)
+                    }
+                }
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        selectedTab = 0
+                    }
+                }
+            
+            Text("For You")
+                .foregroundColor(selectedTab == 1 ? .white : .gray)
+                .fontWeight(selectedTab == 1 ? .semibold : .regular)
+                .overlay(alignment: .bottom) {
+                    if selectedTab == 1 {
+                        Rectangle()
+                            .frame(height: 2)
+                            .matchedGeometryEffect(id: "TAB", in: animation)
+                    }
+                }
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        selectedTab = 1
+                    }
+                }
+        }
+        .font(.system(size: 16))
+        .padding(.top, 50)
+        .padding(.bottom, 20)
+    }
+}
+
+// MARK: - Video Feed View
+struct VideoFeedView: View {
+    @Binding var currentIndex: Int
+    
+    var body: some View {
+        TabView(selection: $currentIndex) {
+            ForEach(0..<5) { index in
+                VideoPlayerFullScreenView(video: Video(mockWithComments: 579))
+                    .rotationEffect(.degrees(0))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tag(index)
+                    .transition(.opacity.combined(with: .scale))
+            }
+        }
+        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Main Home View
 struct HomeView: View {
     @State private var selectedTab = 1 // Default to "For You"
     @State private var currentIndex = 0
-    @Namespace private var animation
     
     var body: some View {
         TabView {
@@ -17,96 +100,38 @@ struct HomeView: View {
                 Color.black.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    // Top Navigation
-                    HStack(spacing: 20) {
-                        Text("Following")
-                            .foregroundColor(selectedTab == 0 ? .white : .gray)
-                            .fontWeight(selectedTab == 0 ? .semibold : .regular)
-                            .overlay(alignment: .bottom) {
-                                if selectedTab == 0 {
-                                    Rectangle()
-                                        .frame(height: 2)
-                                        .matchedGeometryEffect(id: "TAB", in: animation)
-                                }
-                            }
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    selectedTab = 0
-                                }
-                            }
-                        
-                        Text("For You")
-                            .foregroundColor(selectedTab == 1 ? .white : .gray)
-                            .fontWeight(selectedTab == 1 ? .semibold : .regular)
-                            .overlay(alignment: .bottom) {
-                                if selectedTab == 1 {
-                                    Rectangle()
-                                        .frame(height: 2)
-                                        .matchedGeometryEffect(id: "TAB", in: animation)
-                                }
-                            }
-                            .onTapGesture {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    selectedTab = 1
-                                }
-                            }
-                    }
-                    .font(.system(size: 16))
-                    .padding(.top, 50)
-                    .padding(.bottom, 20)
-                    
-                    // Video Feed with spring animation
-                    TabView(selection: $currentIndex) {
-                        ForEach(0..<5) { index in
-                            VideoPlayerFullScreenView()
-                                .rotationEffect(.degrees(0))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .tag(index)
-                                .transition(.opacity.combined(with: .scale))
-                        }
-                    }
-                    .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                    .ignoresSafeArea()
+                    FeedHeaderView(selectedTab: $selectedTab)
+                    VideoFeedView(currentIndex: $currentIndex)
                 }
             }
             .tabItem {
-                Image(systemName: "house.fill")
-                Text("Home")
+                TabBarItemView(imageName: "house", title: "Home", isSystemImage: true)
             }
             .tag(0)
             
-            // Other tabs...
+            // Other tabs
             Group {
-                // Discover Tab
                 Color.black.ignoresSafeArea()
                     .tabItem {
-                        Image(systemName: "magnifyingglass")
-                        Text("Discover")
+                        TabBarItemView(imageName: "magnifyingglass", title: "Discover", isSystemImage: true)
                     }
                     .tag(1)
                 
-                // Create Tab (Plus Button)
                 Color.black.ignoresSafeArea()
                     .tabItem {
-                        Image(systemName: "plus")
-                            .environment(\.symbolVariants, .none)
-                        Text("Create")
+                        TabBarItemView(imageName: "plus", title: "Create", isSystemImage: true)
                     }
                     .tag(2)
                 
-                // Inbox Tab
                 Color.black.ignoresSafeArea()
                     .tabItem {
-                        Image(systemName: "message.fill")
-                        Text("Inbox")
+                        TabBarItemView(imageName: "message", title: "Inbox", isSystemImage: true)
                     }
                     .tag(3)
                 
-                // Profile Tab
                 Color.black.ignoresSafeArea()
                     .tabItem {
-                        Image(systemName: "person.fill")
-                        Text("Profile")
+                        TabBarItemView(imageName: "person", title: "Profile", isSystemImage: true)
                     }
                     .tag(4)
             }
@@ -117,6 +142,7 @@ struct HomeView: View {
 }
 
 struct VideoPlayerFullScreenView: View {
+    let video: Video
     @State private var isLiked = false
     @State private var showingComments = false
     @State private var isMusicDiscRotating = true
@@ -200,7 +226,7 @@ struct VideoPlayerFullScreenView: View {
                                     .font(.system(size: 28))
                                     .scaleEffect(showingComments ? 1.2 : 1.0)
                             }
-                            Text("579")
+                            Text("\(video.comments)")
                                 .font(.system(size: 12))
                         }
                         
@@ -268,6 +294,11 @@ struct VideoPlayerFullScreenView: View {
         }
         .onAppear {
             isMusicDiscRotating = true
+        }
+        .sheet(isPresented: $showingComments) {
+            CommentsView(video: video)
+                .presentationDragIndicator(.visible)
+                .presentationDetents([.medium, .large])
         }
     }
     
