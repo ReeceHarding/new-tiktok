@@ -2,7 +2,7 @@ import SwiftUI
 import FirebaseAuth
 
 struct AuthenticationView: View {
-    @StateObject private var viewModel = AuthenticationViewModel()
+    @ObservedObject var viewModel: AuthenticationViewModel
     @State private var isShowingSignUp = false
     
     var body: some View {
@@ -42,12 +42,9 @@ struct AuthenticationView: View {
                 .padding()
             }
         }
-        .fullScreenCover(isPresented: $viewModel.isAuthenticated) {
-            HomeView()
-        }
     }
 }
 
 #Preview {
-    AuthenticationView()
+    AuthenticationView(viewModel: AuthenticationViewModel())
 } 

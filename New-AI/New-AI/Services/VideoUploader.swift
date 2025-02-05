@@ -52,7 +52,9 @@ class VideoUploader {
         let filename = "\(videoId).mp4"
         
         // Validate filename matches storage rules pattern
-        guard filename.matches(of: /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\.mp4$/).count > 0 else {
+        let pattern = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\.mp4$"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              regex.firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)) != nil else {
             logger.error("❌ Invalid filename format: \(filename)")
             throw VideoUploadError.uploadFailed("Invalid filename format")
         }
@@ -114,7 +116,7 @@ class VideoUploader {
                 - File Size: \(fileSize) bytes (max: \(500 * 1024 * 1024))
                 - Content Type: \(metadata.contentType ?? "unknown")
                 - Storage Path: videos/\(user.uid)/\(filename)
-                - Filename Pattern: \(try filename.matches(of: /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\.mp4$/).count > 0)
+                - Filename Pattern: \((try? NSRegularExpression(pattern: pattern).firstMatch(in: filename, range: NSRange(filename.startIndex..., in: filename)) != nil) ?? false)
                 - User Auth: \(Auth.auth().currentUser?.uid ?? "none") == \(user.uid)
                 - Metadata Fields:
                   - processingStatus: \(metadata.customMetadata?["processingStatus"] ?? "missing")

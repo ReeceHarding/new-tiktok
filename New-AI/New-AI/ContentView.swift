@@ -6,10 +6,19 @@
 //
 
 import SwiftUI
+import FirebaseAuth
 
 struct ContentView: View {
+    @StateObject private var authViewModel = AuthenticationViewModel()
+    
     var body: some View {
-        AuthenticationView()
+        Group {
+            if authViewModel.isAuthenticated {
+                HomeView()
+            } else {
+                AuthenticationView(viewModel: authViewModel)
+            }
+        }
     }
 }
 

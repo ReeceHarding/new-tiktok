@@ -5,6 +5,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import ObjectiveC
+import os.log
 
 // MARK: - Tab Bar Item View
 struct TabBarItemView: View {
@@ -29,6 +30,7 @@ struct TabBarItemView: View {
 struct FeedHeaderView: View {
     @Binding var selectedTab: Int
     @Namespace var animation
+    @ObservedObject var viewModel: VideoFeedViewModel
     
     var body: some View {
         HStack(spacing: 20) {
@@ -45,6 +47,9 @@ struct FeedHeaderView: View {
                 .onTapGesture {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         selectedTab = 0
+                        Task {
+                            await viewModel.updateSelectedTab(0)
+                        }
                     }
                 }
             
@@ -61,6 +66,9 @@ struct FeedHeaderView: View {
                 .onTapGesture {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         selectedTab = 1
+                        Task {
+                            await viewModel.updateSelectedTab(1)
+                        }
                     }
                 }
         }
@@ -72,26 +80,61 @@ struct FeedHeaderView: View {
 
 // MARK: - Video Feed View
 struct VideoFeedView: View {
-    @Binding var currentIndex: Int
+    @StateObject private var viewModel = VideoFeedViewModel()
+    @State private var currentIndex = 0
+    private let logger = Logger(subsystem: "com.eus.teacheditai3.TikTok", category: "VideoFeedView")
     
     var body: some View {
-        TabView(selection: $currentIndex) {
-            ForEach(0..<5) { index in
-                VideoPlayerFullScreenView(video: Video(mockWithComments: 579))
-                    .rotationEffect(.degrees(0))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .tag(index)
-                    .transition(.opacity.combined(with: .scale))
+        ZStack {
+            if viewModel.isLoading && viewModel.videos.isEmpty {
+                ProgressView("Loading videos...")
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+            } else if let error = viewModel.error {
+                VStack {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundColor(.yellow)
+                    Text(error.localizedDescription)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    Button("Retry") {
+                        Task {
+                            await viewModel.refreshFeed()
+                        }
+                    }
+                }
+                .foregroundColor(.white)
+            } else {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(viewModel.videos.enumerated()), id: \.element.id) { index, video in
+                        VideoPlayerFullScreenView(video: video)
+                            .rotationEffect(.degrees(0))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .tag(index)
+                            .onChange(of: currentIndex) { newIndex in
+                                if newIndex == viewModel.videos.count - 2 {
+                                    logger.debug("Approaching end of feed at index \(newIndex), loading more videos")
+                                    Task {
+                                        await viewModel.loadMoreVideos()
+                                    }
+                                }
+                            }
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .ignoresSafeArea(edges: [.top])
             }
         }
-        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-        .ignoresSafeArea()
+        .refreshable {
+            logger.notice("Manual refresh triggered")
+            await viewModel.refreshFeed()
+        }
     }
 }
 
 // MARK: - Main Home View
 struct HomeView: View {
-    @State private var selectedTab = 1 // Default to "For You"
+    @StateObject private var viewModel = VideoFeedViewModel()
     @State private var currentIndex = 0
     
     var body: some View {
@@ -101,8 +144,8 @@ struct HomeView: View {
                 Color.black.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    FeedHeaderView(selectedTab: $selectedTab)
-                    VideoFeedView(currentIndex: $currentIndex)
+                    FeedHeaderView(selectedTab: $viewModel.selectedTab, viewModel: viewModel)
+                    VideoFeedView()
                 }
             }
             .tabItem {
