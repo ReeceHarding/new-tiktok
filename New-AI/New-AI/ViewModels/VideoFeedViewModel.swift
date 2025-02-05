@@ -18,14 +18,13 @@ final class VideoFeedViewModel: ObservableObject {
     private let pageSize = 5
     private var listenerRegistration: ListenerRegistration?
     private var isLoadingMore = false
-    private var hasMoreVideos = true
     private var allVideosLoaded = false
     
     // MARK: - Initialization
     init() {
-        logger.notice("Initializing VideoFeedViewModel")
+        self.logger.notice("Initializing VideoFeedViewModel")
         Task {
-            await fetchInitialVideos()
+            await self.fetchInitialVideos()
         }
     }
     
@@ -39,37 +38,42 @@ final class VideoFeedViewModel: ObservableObject {
     
     /// Fetches the initial batch of videos and sets up real-time listener
     func fetchInitialVideos() async {
-        guard !isLoading else { return }
-        isLoading = true
-        logger.notice("Fetching initial videos batch, pageSize: \(self.pageSize)")
+        guard !self.isLoading else {
+            self.logger.debug("Skipping fetchInitialVideos - already loading")
+            return
+        }
+        
+        self.logger.notice("Fetching initial videos batch with pageSize: \(self.pageSize)")
+        self.isLoading = true
+        self.error = nil
         
         do {
-            let query = createBaseQuery()
-            logger.debug("Query created")
+            let query = self.createBaseQuery()
+                .limit(to: self.pageSize)
             
             let snapshot = try await query.getDocuments()
-            logger.debug("Query executed. Documents count: \(snapshot.documents.count)")
+            self.logger.debug("Fetched \(snapshot.documents.count) initial videos")
             
-            // Log raw document data for debugging
-            for doc in snapshot.documents {
-                logger.debug("Raw document data: \(doc.data())")
+            self.videos = snapshot.documents.compactMap { document -> Video? in
+                do {
+                    return try document.data(as: Video.self)
+                } catch {
+                    self.logger.error("Error decoding video document: \(error.localizedDescription)")
+                    return nil
+                }
             }
             
             self.lastDocument = snapshot.documents.last
-            let fetchedVideos = try snapshot.documents.compactMap { document -> Video in
-                logger.debug("Processing document: \(document.documentID)")
-                let video = try document.data(as: Video.self)
-                logger.debug("Successfully decoded video: \(video.id), status: \(video.status), engagement score: \(video.engagementScore)")
-                return video
-            }
+            self.allVideosLoaded = snapshot.documents.count < self.pageSize
             
-            self.videos = fetchedVideos
-            self.hasMoreVideos = !snapshot.documents.isEmpty
+            self.logger.notice("Initial videos loaded. Total count: \(self.videos.count)")
+            self.logger.debug("All videos loaded: \(self.allVideosLoaded)")
+            
+            // Setup real-time listener after successful initial fetch
             self.setupRealtimeListener()
             
-            logger.notice("Successfully fetched \(fetchedVideos.count) initial videos")
         } catch {
-            logger.error("Error fetching initial videos: \(error.localizedDescription), detailed error: \(String(describing: error))")
+            self.logger.error("Error fetching initial videos: \(error.localizedDescription)")
             self.error = error
         }
         
@@ -78,76 +82,89 @@ final class VideoFeedViewModel: ObservableObject {
     
     /// Fetches the next batch of videos for infinite scrolling
     func loadMoreVideos() async {
-        guard !isLoading, !allVideosLoaded else { return }
+        guard !self.isLoading && !self.isLoadingMore && !self.allVideosLoaded && self.lastDocument != nil else {
+            self.logger.debug("Skipping loadMoreVideos - isLoading: \(self.isLoading), isLoadingMore: \(self.isLoadingMore), allVideosLoaded: \(self.allVideosLoaded), lastDocument exists: \(self.lastDocument != nil)")
+            return
+        }
         
-        isLoading = true
-        defer { isLoading = false }
+        self.logger.notice("Loading more videos...")
+        self.isLoadingMore = true
+        self.error = nil
         
         do {
-            var query = db.collection("videos")
-                .order(by: "uploadDate", descending: true)
-                .limit(to: pageSize)
-            
-            if let lastDocument = lastDocument {
-                query = query.start(afterDocument: lastDocument)
-            }
+            let query = self.createBaseQuery()
+                .start(afterDocument: self.lastDocument!)
+                .limit(to: self.pageSize)
             
             let snapshot = try await query.getDocuments()
+            self.logger.debug("Fetched \(snapshot.documents.count) additional videos")
             
-            guard !snapshot.documents.isEmpty else {
-                allVideosLoaded = true
-                return
+            let newVideos = snapshot.documents.compactMap { document -> Video? in
+                do {
+                    return try document.data(as: Video.self)
+                } catch {
+                    self.logger.error("Error decoding video document: \(error.localizedDescription)")
+                    return nil
+                }
             }
             
-            let newVideos = try snapshot.documents.map { try $0.data(as: Video.self) }
-            videos.append(contentsOf: newVideos)
-            lastDocument = snapshot.documents.last
+            self.videos.append(contentsOf: newVideos)
+            self.lastDocument = snapshot.documents.last
+            self.allVideosLoaded = snapshot.documents.count < self.pageSize
+            
+            self.logger.notice("Additional videos loaded. Total count: \(self.videos.count)")
+            self.logger.debug("All videos loaded: \(self.allVideosLoaded)")
             
         } catch {
-            logger.error("Error loading videos: \(error.localizedDescription)")
+            self.logger.error("Error loading more videos: \(error.localizedDescription)")
             self.error = error
         }
+        
+        self.isLoadingMore = false
     }
     
     /// Refreshes the video feed
     func refreshFeed() async {
-        logger.notice("Refreshing video feed")
-        removeListener()
+        self.logger.notice("Refreshing video feed")
+        self.removeListener()
         self.lastDocument = nil
-        self.hasMoreVideos = true
-        await fetchInitialVideos()
+        self.allVideosLoaded = false
+        self.error = nil
+        await self.fetchInitialVideos()
     }
     
     /// Updates the selected tab (Following/For You) and refreshes content
     func updateSelectedTab(_ tab: Int) async {
-        guard tab != selectedTab else { return }
-        logger.notice("Switching to tab: \(tab)")
+        guard tab != self.selectedTab else { return }
+        self.logger.notice("Switching to tab: \(tab)")
         self.selectedTab = tab
-        await refreshFeed()
+        await self.refreshFeed()
     }
     
     // MARK: - Private Methods
     
+    /// Creates the base Firestore query for fetching videos, ordered by engagementScore.
     private func createBaseQuery() -> Query {
-        let query: Query = db.collection("videos")
+        var query = self.db.collection("videos")
             .order(by: "engagementScore", descending: true)
-            // Removed status filter to show all videos
         
-        if selectedTab == 0 {
-            logger.debug("Following tab query - feature pending implementation")
+        if self.selectedTab == 0 {
+            // Following tab: Implement user-specific feed logic here
+            self.logger.debug("Following tab query - feature pending implementation")
+            // TODO: Add following-specific query filters
         }
         
-        logger.debug("Created base query ordered by engagementScore")
+        self.logger.debug("Created base query ordered by engagementScore")
         return query
     }
     
     private func setupRealtimeListener() {
-        logger.notice("Setting up realtime listener for video updates")
-        removeListener()
+        self.logger.notice("Setting up realtime listener for video updates")
+        self.removeListener()
         
-        let query = createBaseQuery().limit(to: pageSize)
+        let query = self.createBaseQuery().limit(to: self.pageSize)
         
-        listenerRegistration = query.addSnapshotListener { [weak self] snapshot, error in
+        self.listenerRegistration = query.addSnapshotListener { [weak self] snapshot, error in
             guard let self = self else { return }
             
             if let error = error {
@@ -167,7 +184,7 @@ final class VideoFeedViewModel: ObservableObject {
                     self.logger.debug("Realtime update for video: \(video.id), engagement score: \(video.engagementScore)")
                     return video
                 } catch {
-                    self.logger.error("Failed to decode video document \(document.documentID): \(error)")
+                    self.logger.error("Failed to decode video document \(document.documentID): \(error.localizedDescription)")
                     return nil
                 }
             }
@@ -180,45 +197,8 @@ final class VideoFeedViewModel: ObservableObject {
     }
     
     private func removeListener() {
-        listenerRegistration?.remove()
-        listenerRegistration = nil
-        logger.debug("Removed realtime listener")
-    }
-    
-    private func loadMore() async {
-        guard !self.isLoading && !self.isLoadingMore && self.hasMoreVideos && self.lastDocument != nil else {
-            logger.debug("Skipping load more: isLoading=\(self.isLoading), isLoadingMore=\(self.isLoadingMore), hasMoreVideos=\(self.hasMoreVideos), lastDocument=\(String(describing: self.lastDocument))")
-            return
-        }
-
-        do {
-            self.isLoadingMore = true
-            let query = createQuery().start(afterDocument: self.lastDocument!)
-            let snapshot = try await query.getDocuments()
-            
-            if let lastDoc = snapshot.documents.last {
-                self.lastDocument = lastDoc
-                self.hasMoreVideos = snapshot.documents.count >= pageSize
-            } else {
-                self.hasMoreVideos = false
-            }
-            
-            let newVideos = try snapshot.documents.map { try $0.data(as: Video.self) }
-            await MainActor.run {
-                self.videos.append(contentsOf: newVideos)
-            }
-        } catch {
-            logger.error("Error loading more videos: \(error.localizedDescription)")
-            self.error = error
-        }
-        
-        self.isLoadingMore = false
-    }
-    
-    private func createQuery() -> Query {
-        let query: Query = db.collection("videos")
-            .order(by: "engagementScore", descending: true)
-            .limit(to: pageSize)
-        return query
+        self.listenerRegistration?.remove()
+        self.listenerRegistration = nil
+        self.logger.debug("Removed realtime listener")
     }
 } 
