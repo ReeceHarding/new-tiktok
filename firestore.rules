@@ -10,15 +10,36 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
-
-    // Comments collection rules
-    match /comments/{commentId} {
-      allow read, write: if true;  // Temporarily allow all operations during development
+    
+    function isValidVideo() {
+      return request.resource.data.keys().hasAll([
+        'uploaderID', 'status', 'videoURL', 'uploadDate', 'processingMetadata'
+      ]) &&
+      request.resource.data.uploaderID == request.auth.uid &&
+      request.resource.data.status in ['processing', 'processed', 'error'] &&
+      request.resource.data.processingMetadata.keys().hasAll([
+        'transcodingStatus', 'thumbnailStatus', 'transcriptStatus', 'summaryStatus'
+      ]);
     }
 
     // Videos collection rules
     match /videos/{videoId} {
-      allow read, write: if true;  // Temporarily allow all operations during development
+      allow read: if true;  // Allow reading videos
+      allow create: if isSignedIn() && isValidVideo();
+      allow update: if isSignedIn() && isOwner(resource.data.uploaderID);
+      allow delete: if isSignedIn() && isOwner(resource.data.uploaderID);
+      
+      // Comments subcollection
+      match /comments/{commentId} {
+        allow read: if true;
+        allow write: if isSignedIn();
+        
+        // Comment likes subcollection
+        match /likes/{likeId} {
+          allow read: if true;
+          allow write: if isSignedIn();
+        }
+      }
     }
 
     // Default rule - deny everything else

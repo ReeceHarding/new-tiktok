@@ -4,6 +4,7 @@ import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
+import ObjectiveC
 
 // MARK: - Tab Bar Item View
 struct TabBarItemView: View {
@@ -130,7 +131,7 @@ struct HomeView: View {
                 }
                 .tag(3)
             
-            Color.black.ignoresSafeArea()
+            ProfileView()
                 .tabItem {
                     TabBarItemView(imageName: "person", title: "Profile", isSystemImage: true)
                 }
@@ -148,33 +149,25 @@ struct VideoPlayerFullScreenView: View {
     @State private var isMusicDiscRotating = true
     @State private var isProfileHovered = false
     @State private var dragAmount = CGSize.zero
+    @State private var player: AVPlayer?
+    @State private var isLoading = true
     
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottomLeading) {
                 // Video Content
-                Color.black
-                    .overlay(
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.white.opacity(0.5))
-                    )
-                    .gesture(
-                        DragGesture()
-                            .onChanged { dragAmount = $0.translation }
-                            .onEnded { value in
-                                withAnimation(.spring()) {
-                                    if abs(value.translation.height) > 100 {
-                                        // Handle swipe
-                                    }
-                                    dragAmount = .zero
-                                }
-                            }
-                    )
-                    .offset(y: dragAmount.height)
-                    .onTapGesture(count: 2) { location in
-                        handleDoubleTap(at: location, in: geometry)
-                    }
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .onDisappear {
+                            player.pause()
+                        }
+                } else {
+                    Color.black
+                        .overlay(
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        )
+                }
                 
                 VStack {
                     // Right side buttons
@@ -294,12 +287,56 @@ struct VideoPlayerFullScreenView: View {
         }
         .onAppear {
             isMusicDiscRotating = true
+            if player == nil {
+                setupVideo()
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
         }
         .sheet(isPresented: $showingComments) {
             CommentsView(video: video)
                 .presentationDragIndicator(.visible)
                 .presentationDetents([.medium, .large])
         }
+    }
+    
+    private func setupVideo() {
+        guard let url = URL(string: video.videoURL) else { return }
+        
+        func attemptLoad(retries: Int = 3) {
+            guard retries > 0 else {
+                print("❌ Failed to load video after multiple attempts")
+                return
+            }
+            
+            let player = AVPlayer(url: url)
+            player.automaticallyWaitsToMinimizeStalling = true
+            
+            // Add observer for item status
+            let observation = player.currentItem?.observe(\.status) { item, _ in
+                switch item.status {
+                case .failed:
+                    print("🔄 Retry attempt \(4 - retries): \(item.error?.localizedDescription ?? "Unknown error")")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        attemptLoad(retries: retries - 1)
+                    }
+                case .readyToPlay:
+                    DispatchQueue.main.async {
+                        self.player = player
+                        player.play()
+                    }
+                default:
+                    break
+                }
+            }
+            
+            // Store observation to prevent deallocation
+            objc_setAssociatedObject(player, "statusObservation", observation, .OBJC_ASSOCIATION_RETAIN)
+        }
+        
+        attemptLoad()
     }
     
     private func handleDoubleTap(at location: CGPoint, in geometry: GeometryProxy) {

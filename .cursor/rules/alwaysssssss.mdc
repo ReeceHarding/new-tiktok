@@ -33,6 +33,12 @@ Instructions
 
 7. Use Environment Configurations
    - Read the `.env.local` file to review declared configurations and ensure proper integration.
-   - your default funcitonlaty should be editing current files rather than creating new redundant ones
-   - run xcodebuild -scheme ProductivityTalk -sdk iphonesimulator -verbose after all code you generate to make sure everything works
+ 
+ 8. Instructions
+ 
+ - your default funcitonlaty should be editing current files rather than creating new redundant ones
+   - run xcodebuild test -scheme New-AI -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.2' -verbose | cat after all code you generate to make sure everything works
+   - tell me everything you need ME to do at the end of each prompt
+   - don't edit the xcodeproj files. tell me what to do if you want me to do stuff
+   - thoruhgly read [firebase_schema.md](mdc:New-AI/Documentation/firebase_schema.md) make sure everything aligns there-with
    

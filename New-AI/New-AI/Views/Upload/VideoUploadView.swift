@@ -3,6 +3,7 @@ import PhotosUI
 import AVKit
 import FirebaseAuth
 import UniformTypeIdentifiers
+import os.log
 
 struct VideoUploadView: View {
     @State private var selectedItem: PhotosPickerItem? = nil
@@ -14,6 +15,8 @@ struct VideoUploadView: View {
     @State private var caption: String = ""
     @State private var showPreview = false
     @State private var player: AVPlayer? = nil
+    
+    private let logger = Logger(subsystem: "com.eus.teacheditai3.TikTok", category: "VideoUploadView")
     
     var body: some View {
         NavigationView {
@@ -132,39 +135,83 @@ struct VideoUploadView: View {
     }
     
     private func loadVideo(from item: PhotosPickerItem) {
+        logger.notice("🎥 Starting video load from PhotosPickerItem")
+        
         Task {
             do {
+                logger.debug("📥 Loading video data")
                 guard let videoData = try await item.loadTransferable(type: Data.self) else {
+                    logger.error("❌ Failed to load video data from picker item")
                     throw URLError(.badURL)
                 }
                 
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+                // Check file size (500MB limit)
+                let maxSize = 500 * 1024 * 1024 // 500MB in bytes
+                let videoSize = videoData.count
+                logger.debug("📊 Video size: \(videoSize) bytes (max: \(maxSize) bytes)")
+                
+                guard videoSize <= maxSize else {
+                    logger.error("❌ Video size (\(videoSize) bytes) exceeds limit of \(maxSize) bytes")
+                    throw NSError(domain: "VideoUpload", code: -1, 
+                                userInfo: [NSLocalizedDescriptionKey: "Video size exceeds 500MB limit"])
+                }
+                
+                // Create temp file with proper extension
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("mp4")
+                logger.debug("📂 Creating temporary file at: \(tempURL.path)")
+                
                 try videoData.write(to: tempURL)
+                logger.debug("✅ Video data written to temporary file")
+                
+                // Validate video duration
+                logger.debug("⏱️ Checking video duration")
+                let asset = AVAsset(url: tempURL)
+                let duration = try await asset.load(.duration)
+                logger.debug("⏱️ Video duration: \(duration.seconds) seconds")
+                
+                guard duration.seconds <= 180 else { // 3 minutes max
+                    logger.error("❌ Video duration (\(duration.seconds) seconds) exceeds limit of 180 seconds")
+                    throw NSError(domain: "VideoUpload", code: -1,
+                                userInfo: [NSLocalizedDescriptionKey: "Video duration exceeds 3 minutes"])
+                }
                 
                 await MainActor.run {
+                    logger.notice("✅ Video loaded successfully")
+                    logger.debug("📊 Video stats - Size: \(videoSize) bytes, Duration: \(duration.seconds) seconds")
                     self.selectedVideoURL = tempURL
                     self.player = AVPlayer(url: tempURL)
                     self.player?.play()
                     self.errorMessage = nil
                 }
             } catch {
+                logger.error("❌ Video load failed: \(error.localizedDescription)")
                 await MainActor.run {
                     self.errorMessage = "Failed to load video: \(error.localizedDescription)"
+                    self.selectedVideoURL = nil
+                    self.player = nil
                 }
             }
         }
     }
     
     private func uploadVideo() async {
+        logger.notice("🚀 Starting video upload process")
+        
         guard let videoURL = selectedVideoURL else {
+            logger.error("❌ No video URL available for upload")
             errorMessage = "No video selected."
             return
         }
         
         guard !caption.isEmpty else {
+            logger.error("❌ No caption provided")
             errorMessage = "Please add a caption."
             return
         }
+        
+        logger.debug("📝 Upload parameters - Caption: \(caption), Video URL: \(videoURL.path)")
         
         isUploading = true
         errorMessage = nil
@@ -172,13 +219,28 @@ struct VideoUploadView: View {
         uploadProgress = 0.0
         
         do {
-            let downloadURL = try await VideoUploader.uploadVideo(fileURL: videoURL)
+            logger.notice("📤 Initiating upload to Firebase")
+            let downloadURL = try await VideoUploader.uploadVideo(
+                fileURL: videoURL,
+                caption: caption,
+                progressHandler: { progress in
+                    Task { @MainActor in
+                        self.uploadProgress = progress
+                        logger.debug("📊 Upload progress update: \(Int(progress * 100))%")
+                    }
+                }
+            )
+            
+            logger.notice("✅ Upload completed successfully")
+            logger.debug("🔗 Download URL: \(downloadURL)")
+            
             await MainActor.run {
                 successMessage = "Video uploaded successfully!"
                 isUploading = false
                 uploadProgress = 1.0
                 // Reset the view after a successful upload
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    logger.debug("🔄 Resetting view state after successful upload")
                     self.selectedItem = nil
                     self.selectedVideoURL = nil
                     self.player = nil
@@ -187,9 +249,46 @@ struct VideoUploadView: View {
                     self.uploadProgress = 0.0
                 }
             }
-        } catch {
+        } catch VideoUploadError.userNotAuthenticated {
+            logger.error("❌ Upload failed: User not authenticated")
             await MainActor.run {
-                errorMessage = "Upload failed: \(error.localizedDescription)"
+                errorMessage = "Please sign in to upload videos."
+                isUploading = false
+            }
+        } catch VideoUploadError.invalidURL {
+            logger.error("❌ Upload failed: Invalid URL")
+            await MainActor.run {
+                errorMessage = "The selected video file is no longer accessible."
+                isUploading = false
+            }
+        } catch VideoUploadError.retryExhausted {
+            logger.error("❌ Upload failed: Retry attempts exhausted")
+            await MainActor.run {
+                errorMessage = "Upload failed after multiple attempts. Please try again."
+                isUploading = false
+            }
+        } catch VideoUploadError.uploadFailed(let message) {
+            logger.error("❌ Upload failed with message: \(message)")
+            await MainActor.run {
+                errorMessage = "Upload failed: \(message)"
+                isUploading = false
+            }
+        } catch VideoUploadError.metadataError(let message) {
+            logger.error("❌ Metadata error: \(message)")
+            await MainActor.run {
+                errorMessage = "Metadata error: \(message)"
+                isUploading = false
+            }
+        } catch VideoUploadError.firestoreError(let message) {
+            logger.error("❌ Firestore error: \(message)")
+            await MainActor.run {
+                errorMessage = "Database error: \(message)"
+                isUploading = false
+            }
+        } catch {
+            logger.error("❌ Unexpected error: \(error.localizedDescription)")
+            await MainActor.run {
+                errorMessage = "An unexpected error occurred: \(error.localizedDescription)"
                 isUploading = false
             }
         }
