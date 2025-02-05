@@ -13,13 +13,26 @@ class CommentsViewModel: ObservableObject {
         isLoading = true
         
         do {
-            let snapshot = try await db.collection("comments")
-                .whereField("video_id", isEqualTo: videoID)
+            let snapshot = try await db.collection("videos").document(videoID)
+                .collection("comments")
                 .order(by: "timestamp", descending: true)
                 .getDocuments()
             
-            let fetchedComments = snapshot.documents.compactMap { document -> Comment? in
+            var fetchedComments = snapshot.documents.compactMap { document -> Comment? in
                 try? document.data(as: Comment.self)
+            }
+            
+            // Fetch like status for each comment if user is signed in
+            if let currentUserID = Auth.auth().currentUser?.uid {
+                for i in 0..<fetchedComments.count {
+                    let commentID = fetchedComments[i].id
+                    let likeDoc = try? await db.collection("videos").document(videoID)
+                        .collection("comments").document(commentID)
+                        .collection("likes").document(currentUserID)
+                        .getDocument()
+                    
+                    fetchedComments[i].isLiked = likeDoc?.exists ?? false
+                }
             }
             
             self.comments = fetchedComments
@@ -35,6 +48,10 @@ class CommentsViewModel: ObservableObject {
             throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not signed in"])
         }
         
+        guard text.count <= 250 else {
+            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "Comment cannot exceed 250 characters"])
+        }
+        
         let commentID = UUID().uuidString
         let comment = Comment(
             id: commentID,
@@ -43,15 +60,19 @@ class CommentsViewModel: ObservableObject {
             username: user.email ?? "unknown",
             text: text,
             timestamp: Date(),
-            likes: 0,
-            isLiked: false
+            likeCount: 0,
+            edited: false,
+            editTimestamp: nil
         )
         
-        try await db.collection("comments").document(commentID).setData(from: comment)
+        // Add comment to subcollection
+        try await db.collection("videos").document(videoID)
+            .collection("comments").document(commentID)
+            .setData(from: comment)
         
         // Update video comment count
         try await db.collection("videos").document(videoID).updateData([
-            "comments": FieldValue.increment(Int64(1))
+            "comment_count": FieldValue.increment(Int64(1))
         ])
         
         // Refresh comments
@@ -59,9 +80,53 @@ class CommentsViewModel: ObservableObject {
     }
     
     func likeComment(_ comment: Comment) async throws {
-        try await db.collection("comments").document(comment.id).updateData([
-            "likes": FieldValue.increment(Int64(1))
-        ])
+        guard let user = Auth.auth().currentUser else {
+            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not signed in"])
+        }
+        
+        let commentRef = db.collection("videos").document(comment.videoID)
+            .collection("comments").document(comment.id)
+        let likeRef = commentRef.collection("likes").document(user.uid)
+        
+        let likeDoc = try await likeRef.getDocument()
+        
+        if likeDoc.exists {
+            // Unlike
+            try await likeRef.delete()
+            try await commentRef.updateData([
+                "like_count": FieldValue.increment(Int64(-1))
+            ])
+        } else {
+            // Like
+            try await likeRef.setData([
+                "user_id": user.uid,
+                "liked_at": FieldValue.serverTimestamp()
+            ])
+            try await commentRef.updateData([
+                "like_count": FieldValue.increment(Int64(1))
+            ])
+        }
+        
+        await fetchComments(for: comment.videoID)
+    }
+    
+    func editComment(_ comment: Comment, newText: String) async throws {
+        guard let user = Auth.auth().currentUser, user.uid == comment.userID else {
+            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "You can only edit your own comments"])
+        }
+        
+        guard newText.count <= 250 else {
+            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "Comment cannot exceed 250 characters"])
+        }
+        
+        try await db.collection("videos").document(comment.videoID)
+            .collection("comments").document(comment.id)
+            .updateData([
+                "text": newText,
+                "edited": true,
+                "edit_timestamp": FieldValue.serverTimestamp()
+            ])
+        
         await fetchComments(for: comment.videoID)
     }
 } 

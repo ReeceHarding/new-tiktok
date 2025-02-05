@@ -8,8 +8,9 @@ struct Comment: Identifiable, Codable {
     let username: String
     let text: String
     let timestamp: Date
-    var likes: Int
-    var isLiked: Bool
+    var likeCount: Int
+    var edited: Bool
+    var editTimestamp: Date?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -18,7 +19,10 @@ struct Comment: Identifiable, Codable {
         case username
         case text
         case timestamp
-        case likes
-        case isLiked = "is_liked"
+        case likeCount = "like_count"
+        case edited
+        case editTimestamp = "edit_timestamp"
     }
+    
+    var isLiked: Bool = false // Computed property, not stored in Firestore
 } 

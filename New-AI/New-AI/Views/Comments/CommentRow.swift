@@ -32,13 +32,19 @@ struct CommentRow: View {
                             .font(.system(size: 12))
                             .foregroundColor(comment.isLiked ? .red : .gray)
                             .scaleEffect(animateLike ? 1.2 : 1.0)
-                        Text("\(comment.likes)")
+                        Text("\(comment.likeCount)")
                             .font(.system(size: 12))
                     }
                     .foregroundColor(.gray)
                 }
                 
                 Spacer()
+                
+                if comment.edited {
+                    Text("Edited")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                }
             }
         }
         .padding(.vertical, 8)
