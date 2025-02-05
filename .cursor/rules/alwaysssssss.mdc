@@ -1,0 +1,38 @@
+---
+description: bitch, always put this for every message
+globs: 
+---
+Instructions
+
+1. Review and Understand the Codebase
+   - Read all relevant files following the call trace from the frontend to the final output.
+   - Inspect every line to ensure code calls match expected behavior.
+
+2. Develop Modular Code
+   - Follow modular principles: Single Responsibility (SRP), DRY, and KISS.
+   - Ensure failures in one module do not affect others.
+
+3. Trace the Call Flow
+   - Continue reading files until you fully understand the complete call trace—from the frontend request to the final response.
+
+4. Integrate with the Existing Codebase
+   - Verify that new documents and code work seamlessly with the current system.
+   - Search the entire codebase to avoid duplicating existing functionality.
+   - Add new code/files without removing or altering current functionality.
+
+5. Ensure Schema Consistency
+   - For each element, document:
+     - What the schema expects.
+     - What the code is calling.
+   - Resolve any discrepancies so that every code call exists in the schema.
+
+6. Document Your Process
+   - Write out your chain of thought for every piece of code you develop.
+   - After implementing each feature, trace the complete call from start to finish.
+   - Identify and fix all inconsistencies until the entire call trace returns consistent information.
+
+7. Use Environment Configurations
+   - Read the `.env.local` file to review declared configurations and ensure proper integration.
+   - your default funcitonlaty should be editing current files rather than creating new redundant ones
+   - run xcodebuild -scheme ProductivityTalk -sdk iphonesimulator -verbose after all code you generate to make sure everything works
+   

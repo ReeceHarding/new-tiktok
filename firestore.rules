@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Comments collection rules
+    match /comments/{commentId} {
+      allow read, write: if true;  // Temporarily allow all operations during development
+    }
+
+    // Videos collection rules
+    match /videos/{videoId} {
+      allow read, write: if true;  // Temporarily allow all operations during development
+    }
+
+    // Default rule - deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+} 
