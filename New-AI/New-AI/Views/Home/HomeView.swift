@@ -111,13 +111,8 @@ struct VideoFeedView: View {
                             .rotationEffect(.degrees(0))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .tag(index)
-                            .onChange(of: currentIndex) { newIndex in
-                                if newIndex == viewModel.videos.count - 2 {
-                                    logger.debug("Approaching end of feed at index \(newIndex), loading more videos")
-                                    Task {
-                                        await viewModel.loadMoreVideos()
-                                    }
-                                }
+                            .onChange(of: currentIndex) { oldValue, newValue in
+                                handleIndexChange(newValue)
                             }
                     }
                 }
@@ -128,6 +123,15 @@ struct VideoFeedView: View {
         .refreshable {
             logger.notice("Manual refresh triggered")
             await viewModel.refreshFeed()
+        }
+    }
+    
+    private func handleIndexChange(_ newValue: Int) {
+        if newValue == viewModel.videos.count - 2 {
+            logger.debug("Approaching end of feed at index \(newValue), loading more videos")
+            Task {
+                await viewModel.loadMoreVideos()
+            }
         }
     }
 }
@@ -262,7 +266,7 @@ struct VideoPlayerFullScreenView: View {
                                     .font(.system(size: 28))
                                     .scaleEffect(showingComments ? 1.2 : 1.0)
                             }
-                            Text("\(video.comments)")
+                            Text("\(video.commentCount)")
                                 .font(.system(size: 12))
                         }
                         
@@ -339,7 +343,7 @@ struct VideoPlayerFullScreenView: View {
             player = nil
         }
         .sheet(isPresented: $showingComments) {
-            CommentsView(video: video)
+            CommentsView(viewModel: CommentsViewModel(videoID: video.id), videoID: video.id)
                 .presentationDragIndicator(.visible)
                 .presentationDetents([.medium, .large])
         }

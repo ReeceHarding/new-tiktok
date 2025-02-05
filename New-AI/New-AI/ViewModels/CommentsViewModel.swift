@@ -1,132 +1,190 @@
-import SwiftUI
+import Foundation
 import FirebaseFirestore
 import FirebaseAuth
+import os.log
 
 @MainActor
-class CommentsViewModel: ObservableObject {
-    private let db = Firestore.firestore()
+final class CommentsViewModel: ObservableObject {
     @Published var comments: [Comment] = []
     @Published var isLoading = false
-    @Published var error: String?
+    @Published var isSubmitting = false
+    @Published var error: Error?
     
-    func fetchComments(for videoID: String) async {
-        isLoading = true
+    private let db = Firestore.firestore()
+    private let videoID: String
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "New-AI", category: "CommentsViewModel")
+    private var listenerRegistration: ListenerRegistration?
+    
+    init(videoID: String) {
+        self.videoID = videoID
+        setupCommentsListener()
+    }
+    
+    deinit {
+        listenerRegistration?.remove()
+    }
+    
+    private func setupCommentsListener() {
+        listenerRegistration?.remove()
         
-        do {
-            let snapshot = try await db.collection("videos").document(videoID)
-                .collection("comments")
-                .order(by: "timestamp", descending: true)
-                .getDocuments()
+        let commentsRef = db.collection("videos").document(videoID).collection("comments")
+            .order(by: "timestamp", descending: true)
+        
+        listenerRegistration = commentsRef.addSnapshotListener { [weak self] snapshot, error in
+            guard let self = self else { return }
             
-            var fetchedComments = snapshot.documents.compactMap { document -> Comment? in
-                try? document.data(as: Comment.self)
+            if let error = error {
+                self.logger.error("Error listening for comments: \(error.localizedDescription)")
+                self.error = error
+                return
             }
             
-            // Fetch like status for each comment if user is signed in
-            if let currentUserID = Auth.auth().currentUser?.uid {
-                for i in 0..<fetchedComments.count {
-                    let commentID = fetchedComments[i].id
-                    let likeDoc = try? await db.collection("videos").document(videoID)
-                        .collection("comments").document(commentID)
-                        .collection("likes").document(currentUserID)
-                        .getDocument()
-                    
-                    fetchedComments[i].isLiked = likeDoc?.exists ?? false
+            guard let documents = snapshot?.documents else {
+                self.logger.error("No documents in snapshot")
+                return
+            }
+            
+            self.comments = documents.compactMap { document -> Comment? in
+                do {
+                    return try document.data(as: Comment.self)
+                } catch {
+                    self.logger.error("Error decoding comment: \(error.localizedDescription)")
+                    return nil
                 }
             }
-            
-            self.comments = fetchedComments
-            self.isLoading = false
-        } catch {
-            self.error = error.localizedDescription
-            self.isLoading = false
         }
     }
     
-    func addComment(videoID: String, text: String) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not signed in"])
+    func addComment(text: String) async throws {
+        isSubmitting = true
+        defer { isSubmitting = false }
+        
+        guard let userID = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
         }
         
-        guard text.count <= 250 else {
-            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "Comment cannot exceed 250 characters"])
-        }
+        let batch = db.batch()
         
-        let commentID = UUID().uuidString
+        // Create comment document reference
+        let commentsRef = db.collection("videos").document(videoID).collection("comments")
+        let newCommentRef = commentsRef.document()
+        
         let comment = Comment(
-            id: commentID,
-            videoID: videoID,
-            userID: user.uid,
-            username: user.email ?? "unknown",
-            text: text,
-            timestamp: Date(),
-            likeCount: 0,
-            edited: false,
-            editTimestamp: nil
+            id: newCommentRef.documentID,
+            userID: userID,
+            text: text
         )
         
-        // Add comment to subcollection
-        try await db.collection("videos").document(videoID)
-            .collection("comments").document(commentID)
-            .setData(from: comment)
+        // Set comment data
+        try batch.setData(from: comment, forDocument: newCommentRef)
         
-        // Update video comment count
-        try await db.collection("videos").document(videoID).updateData([
-            "comment_count": FieldValue.increment(Int64(1))
-        ])
+        // Update video's comment count
+        let videoRef = db.collection("videos").document(videoID)
+        batch.updateData([
+            "commentCount": FieldValue.increment(Int64(1))
+        ], forDocument: videoRef)
         
-        // Refresh comments
-        await fetchComments(for: videoID)
+        // Commit the batch
+        try await batch.commit()
+        
+        // Update local state
+        comments.insert(comment, at: 0)
     }
     
-    func likeComment(_ comment: Comment) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not signed in"])
-        }
+    func toggleLike(for comment: Comment) async throws {
+        guard let userID = Auth.auth().currentUser?.uid,
+              let commentID = comment.id else { return }
         
-        let commentRef = db.collection("videos").document(comment.videoID)
-            .collection("comments").document(comment.id)
-        let likeRef = commentRef.collection("likes").document(user.uid)
+        let likesRef = db.collection("videos").document(videoID)
+            .collection("comments").document(commentID)
+            .collection("likes")
         
-        let likeDoc = try await likeRef.getDocument()
+        let likeDoc = likesRef.document(userID)
+        let commentRef = db.collection("videos").document(videoID)
+            .collection("comments").document(commentID)
         
-        if likeDoc.exists {
+        let likeSnapshot = try await likeDoc.getDocument()
+        
+        if likeSnapshot.exists {
             // Unlike
-            try await likeRef.delete()
-            try await commentRef.updateData([
-                "like_count": FieldValue.increment(Int64(-1))
-            ])
+            _ = try await db.runTransaction({ (transaction, errorPointer) -> Any? in
+                transaction.deleteDocument(likeDoc)
+                transaction.updateData([
+                    "likeCount": FieldValue.increment(Int64(-1))
+                ], forDocument: commentRef)
+                return nil
+            })
+            
+            if let index = comments.firstIndex(where: { $0.id == commentID }) {
+                comments[index].likeCount -= 1
+            }
         } else {
             // Like
-            try await likeRef.setData([
-                "user_id": user.uid,
-                "liked_at": FieldValue.serverTimestamp()
-            ])
-            try await commentRef.updateData([
-                "like_count": FieldValue.increment(Int64(1))
-            ])
+            _ = try await db.runTransaction({ (transaction, errorPointer) -> Any? in
+                transaction.setData([
+                    "userID": userID,
+                    "likedAt": FieldValue.serverTimestamp()
+                ], forDocument: likeDoc)
+                
+                transaction.updateData([
+                    "likeCount": FieldValue.increment(Int64(1))
+                ], forDocument: commentRef)
+                return nil
+            })
+            
+            if let index = comments.firstIndex(where: { $0.id == commentID }) {
+                comments[index].likeCount += 1
+            }
         }
+    }
+    
+    func deleteComment(_ comment: Comment) async throws {
+        guard let userID = Auth.auth().currentUser?.uid,
+              userID == comment.userID,
+              let commentID = comment.id else { return }
         
-        await fetchComments(for: comment.videoID)
+        let batch = db.batch()
+        
+        // Delete comment document
+        let commentRef = db.collection("videos").document(videoID)
+            .collection("comments").document(commentID)
+        batch.deleteDocument(commentRef)
+        
+        // Update video's comment count
+        let videoRef = db.collection("videos").document(videoID)
+        batch.updateData([
+            "commentCount": FieldValue.increment(Int64(-1))
+        ], forDocument: videoRef)
+        
+        // Commit the batch
+        try await batch.commit()
+        
+        // Update local state
+        comments.removeAll(where: { $0.id == commentID })
     }
     
     func editComment(_ comment: Comment, newText: String) async throws {
-        guard let user = Auth.auth().currentUser, user.uid == comment.userID else {
-            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "You can only edit your own comments"])
+        guard let userID = Auth.auth().currentUser?.uid,
+              userID == comment.userID,
+              let commentID = comment.id else { return }
+        
+        let commentRef = db.collection("videos").document(videoID)
+            .collection("comments").document(commentID)
+        
+        let updateData: [String: Any] = [
+            "text": newText,
+            "edited": true,
+            "editTimestamp": FieldValue.serverTimestamp()
+        ]
+        
+        try await commentRef.updateData(updateData)
+        
+        if let index = comments.firstIndex(where: { $0.id == commentID }) {
+            var updatedComment = comments[index]
+            updatedComment.text = newText
+            updatedComment.edited = true
+            updatedComment.editTimestamp = Date()
+            comments[index] = updatedComment
         }
-        
-        guard newText.count <= 250 else {
-            throw NSError(domain: "Comments", code: -1, userInfo: [NSLocalizedDescriptionKey: "Comment cannot exceed 250 characters"])
-        }
-        
-        try await db.collection("videos").document(comment.videoID)
-            .collection("comments").document(comment.id)
-            .updateData([
-                "text": newText,
-                "edited": true,
-                "edit_timestamp": FieldValue.serverTimestamp()
-            ])
-        
-        await fetchComments(for: comment.videoID)
     }
 } 

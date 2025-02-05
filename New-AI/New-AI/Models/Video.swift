@@ -3,71 +3,68 @@ import FirebaseFirestore
 
 struct Video: Identifiable, Codable, Equatable {
     let id: String
-    let userID: String
-    let username: String
-    let caption: String
+    let uploaderID: String
+    let title: String
+    let description: String
     let videoURL: String
     let thumbnailURL: String?
-    var likes: Int
-    var comments: Int
-    let timestamp: Date
-    let fileSize: Int64
+    let status: String
+    let uploadDate: Date
     let duration: Double
     let resolution: String
-    let status: String
+    let fileSize: Int64
+    let viewCount: Int
+    let likeCount: Int
+    let commentCount: Int
     let totalWatchTime: Double
     let averageWatchTime: Double
     let completionRate: Double
     let rewatchRate: Double
     let transcript: String
     let summary: String
-    let processingMetadata: ProcessingMetadata
     let engagementScore: Double
     let searchKeywords: [String]
+    let tags: [String]
+    let processingMetadata: ProcessingMetadata
     
     struct ProcessingMetadata: Codable {
-        let transcodingStatus: String
-        let thumbnailStatus: String
-        let transcriptStatus: String
-        let summaryStatus: String
+        let contentType: String
         let originalFileName: String
         let originalFileSize: Int64
-        let contentType: String
-        
-        enum CodingKeys: String, CodingKey {
-            case transcodingStatus = "transcodingStatus"
-            case thumbnailStatus = "thumbnailStatus"
-            case transcriptStatus = "transcriptStatus"
-            case summaryStatus = "summaryStatus"
-            case originalFileName = "originalFileName"
-            case originalFileSize = "originalFileSize"
-            case contentType = "contentType"
-        }
+        let processingStatus: String
+        let summaryStatus: String
+        let thumbnailStatus: String
+        let transcodingStatus: String
+        let transcriptStatus: String
+        let uploadAttempt: Int
+        let uploadTimestamp: Date
     }
     
     enum CodingKeys: String, CodingKey {
         case id
-        case userID = "user_id"
-        case username
-        case caption
-        case videoURL = "video_url"
-        case thumbnailURL = "thumbnail_url"
-        case likes
-        case comments
-        case timestamp
-        case fileSize
+        case uploaderID
+        case title
+        case description
+        case videoURL
+        case thumbnailURL
+        case status
+        case uploadDate
         case duration
         case resolution
-        case status
+        case fileSize
+        case viewCount
+        case likeCount
+        case commentCount
         case totalWatchTime
         case averageWatchTime
         case completionRate
         case rewatchRate
         case transcript
         case summary
-        case processingMetadata
         case engagementScore
         case searchKeywords
+        case tags
+        case processingMetadata
     }
     
     // Computed property for local debugging: calculates a simple engagement score
@@ -82,7 +79,7 @@ struct Video: Identifiable, Codable, Equatable {
         let watchTimeRatio = duration > 0 ? min(totalWatchTime / duration, 1.0) : 0
         
         // Normalize likes (using a log scale to prevent extreme values from dominating)
-        let normalizedLikes = likes > 0 ? min(log10(Double(likes)) / 5.0, 1.0) : 0
+        let normalizedLikes = likeCount > 0 ? min(log10(Double(likeCount)) / 5.0, 1.0) : 0
         
         // Calculate weighted score
         let score = (watchTimeWeight * watchTimeRatio) +
@@ -96,18 +93,19 @@ struct Video: Identifiable, Codable, Equatable {
     // Convenience initializer for mock data
     init(mockWithComments comments: Int) {
         self.id = UUID().uuidString
-        self.userID = "mock_user"
-        self.username = "mock_username"
-        self.caption = "Mock Caption"
+        self.uploaderID = "mock_user"
+        self.title = "Mock Title"
+        self.description = "Mock Description"
         self.videoURL = "mock_url"
         self.thumbnailURL = nil
-        self.likes = 0
-        self.comments = comments
-        self.timestamp = Date()
-        self.fileSize = 0
+        self.status = "processing"
+        self.uploadDate = Date()
         self.duration = 0
         self.resolution = ""
-        self.status = "processing"
+        self.fileSize = 0
+        self.viewCount = 0
+        self.likeCount = 0
+        self.commentCount = comments
         self.totalWatchTime = 0
         self.averageWatchTime = 0
         self.completionRate = 0
@@ -116,14 +114,18 @@ struct Video: Identifiable, Codable, Equatable {
         self.summary = ""
         self.engagementScore = 0
         self.searchKeywords = []
+        self.tags = []
         self.processingMetadata = ProcessingMetadata(
-            transcodingStatus: "pending",
-            thumbnailStatus: "pending",
-            transcriptStatus: "pending",
-            summaryStatus: "pending",
+            contentType: "video/mp4",
             originalFileName: "mock.mp4",
             originalFileSize: 0,
-            contentType: "video/mp4"
+            processingStatus: "pending",
+            summaryStatus: "pending",
+            thumbnailStatus: "pending",
+            transcodingStatus: "pending",
+            transcriptStatus: "pending",
+            uploadAttempt: 1,
+            uploadTimestamp: Date()
         )
     }
     

@@ -2,27 +2,31 @@ import Foundation
 import FirebaseFirestore
 
 struct Comment: Identifiable, Codable {
-    let id: String
-    let videoID: String
+    @DocumentID var id: String?
     let userID: String
-    let username: String
-    let text: String
+    var text: String
     let timestamp: Date
-    var likeCount: Int
     var edited: Bool
     var editTimestamp: Date?
+    var likeCount: Int
     
     enum CodingKeys: String, CodingKey {
         case id
-        case videoID = "video_id"
-        case userID = "user_id"
-        case username
+        case userID
         case text
         case timestamp
-        case likeCount = "like_count"
         case edited
-        case editTimestamp = "edit_timestamp"
+        case editTimestamp
+        case likeCount
     }
     
-    var isLiked: Bool = false // Computed property, not stored in Firestore
+    init(id: String? = nil, userID: String, text: String, timestamp: Date = Date(), edited: Bool = false, editTimestamp: Date? = nil, likeCount: Int = 0) {
+        self.id = id
+        self.userID = userID
+        self.text = text
+        self.timestamp = timestamp
+        self.edited = edited
+        self.editTimestamp = editTimestamp
+        self.likeCount = likeCount
+    }
 } 
