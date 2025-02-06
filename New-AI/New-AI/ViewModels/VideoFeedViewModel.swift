@@ -2,6 +2,7 @@ import Foundation
 import FirebaseFirestore
 import os.log
 import Combine
+import FirebaseAuth
 
 @MainActor
 final class VideoFeedViewModel: ObservableObject {
@@ -10,6 +11,7 @@ final class VideoFeedViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: Error?
     @Published var selectedTab: Int = 1 // 0: Following, 1: For You
+    @Published var currentVideoIndex: Int = 0
     
     // MARK: - Private Properties
     private let db = Firestore.firestore()
@@ -141,12 +143,31 @@ final class VideoFeedViewModel: ObservableObject {
         await self.refreshFeed()
     }
     
+    @MainActor
+    func moveToNextVideo() {
+        guard currentVideoIndex < videos.count - 1 else { return }
+        currentVideoIndex += 1
+        
+        // Load more videos if we're near the end
+        if currentVideoIndex >= videos.count - 2 {
+            Task {
+                await loadMoreVideos()
+            }
+        }
+    }
+    
+    @MainActor
+    func moveToPreviousVideo() {
+        guard currentVideoIndex > 0 else { return }
+        currentVideoIndex -= 1
+    }
+    
     // MARK: - Private Methods
     
     /// Creates the base Firestore query for fetching videos, ordered by engagementScore.
     private func createBaseQuery() -> Query {
-        var query = self.db.collection("videos")
-            .order(by: "engagementScore", descending: true)
+        let query = self.db.collection("videos")
+            .order(by: "likeCount", descending: true)
         
         if self.selectedTab == 0 {
             // Following tab: Implement user-specific feed logic here
@@ -154,7 +175,7 @@ final class VideoFeedViewModel: ObservableObject {
             // TODO: Add following-specific query filters
         }
         
-        self.logger.debug("Created base query ordered by engagementScore")
+        self.logger.debug("Created base query ordered by likeCount")
         return query
     }
     
@@ -200,5 +221,96 @@ final class VideoFeedViewModel: ObservableObject {
         self.listenerRegistration?.remove()
         self.listenerRegistration = nil
         self.logger.debug("Removed realtime listener")
+    }
+    
+    /// Toggles like status for a video
+    func toggleLike(for video: Video) async throws {
+        guard let userID = Auth.auth().currentUser?.uid else {
+            self.logger.error("Failed to toggle like: User not logged in")
+            throw NSError(domain: "", code: -1, userInfo: [NSLocalizedDescriptionKey: "User not logged in"])
+        }
+        
+        self.logger.notice("Attempting to toggle like for video: \(video.id), current like count: \(video.likeCount)")
+        
+        let videoRef = db.collection("videos").document(video.id)
+        let likeRef = videoRef.collection("likes").document(userID)
+        let userLikedVideoRef = db.collection("users").document(userID)
+            .collection("likedVideos").document(video.id)
+        
+        do {
+            let likeDoc = try await likeRef.getDocument()
+            self.logger.debug("Like document exists: \(likeDoc.exists), for video: \(video.id)")
+            
+            if likeDoc.exists {
+                // Unlike the video
+                self.logger.notice("Unliking video: \(video.id)")
+                let _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
+                    // Remove the like document from video's likes collection
+                    transaction.deleteDocument(likeRef)
+                    
+                    // Remove from user's likedVideos collection
+                    transaction.deleteDocument(userLikedVideoRef)
+                    
+                    // Decrement the video's like count
+                    transaction.updateData([
+                        "likeCount": FieldValue.increment(Int64(-1))
+                    ], forDocument: videoRef)
+                    
+                    return nil
+                }
+                
+                // Get the updated video document to ensure we have the correct state
+                let updatedDoc = try await videoRef.getDocument()
+                if let updatedVideo = try? updatedDoc.data(as: Video.self) {
+                    // Update local state with the verified Firestore state
+                    if let index = videos.firstIndex(where: { $0.id == video.id }) {
+                        self.logger.debug("Before unlike - Video at index \(index) has \(self.videos[index].likeCount) likes")
+                        self.videos[index].likeCount = updatedVideo.likeCount
+                        self.logger.debug("After unlike - Video now has \(self.videos[index].likeCount) likes")
+                    }
+                    self.logger.notice("Video unliked: \(video.id), new like count: \(updatedVideo.likeCount)")
+                }
+                
+            } else {
+                // Like the video
+                self.logger.notice("Liking video: \(video.id)")
+                let _ = try await db.runTransaction { (transaction, errorPointer) -> Any? in
+                    // Create the like document in video's likes collection
+                    transaction.setData([
+                        "userID": userID,
+                        "likedAt": FieldValue.serverTimestamp()
+                    ], forDocument: likeRef)
+                    
+                    // Add to user's likedVideos collection
+                    transaction.setData([
+                        "videoID": video.id,
+                        "likedAt": FieldValue.serverTimestamp()
+                    ], forDocument: userLikedVideoRef)
+                    
+                    // Increment the video's like count
+                    transaction.updateData([
+                        "likeCount": FieldValue.increment(Int64(1))
+                    ], forDocument: videoRef)
+                    
+                    return nil
+                }
+                
+                // Get the updated video document to ensure we have the correct state
+                let updatedDoc = try await videoRef.getDocument()
+                if let updatedVideo = try? updatedDoc.data(as: Video.self) {
+                    // Update local state with the verified Firestore state
+                    if let index = videos.firstIndex(where: { $0.id == video.id }) {
+                        self.logger.debug("Before like - Video at index \(index) has \(self.videos[index].likeCount) likes")
+                        self.videos[index].likeCount = updatedVideo.likeCount
+                        self.logger.debug("After like - Video now has \(self.videos[index].likeCount) likes")
+                    }
+                    self.logger.notice("Video liked: \(video.id), new like count: \(updatedVideo.likeCount)")
+                }
+            }
+            
+        } catch {
+            self.logger.error("Error toggling like: \(error.localizedDescription)")
+            throw error
+        }
     }
 } 
